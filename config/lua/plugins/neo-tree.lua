@@ -8,7 +8,7 @@ return {
   },
   cmd = "Neotree",
   keys = {
-    { "<leader>ee", "<cmd>Neotree toggle<cr>", desc = "Toggle explorer" },
+    { "<C-n>", "<cmd>Neotree toggle<cr>", desc = "Toggle explorer" },
     { "<leader>ef", "<cmd>Neotree reveal<cr>", desc = "Reveal current file" },
     { "<leader>eg", "<cmd>Neotree git_status<cr>", desc = "Git status" },
   },
