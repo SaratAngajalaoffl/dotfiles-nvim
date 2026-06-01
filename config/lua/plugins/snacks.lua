@@ -19,6 +19,8 @@ return {
     { "<leader>fr", function() Snacks.picker.recent() end, desc = "Recent files" },
     { "<leader>fh", function() Snacks.picker.help() end, desc = "Help pages" },
     { "<leader>/",  function() Snacks.picker.grep_buffers() end, desc = "Search open buffers" },
+    -- Terminal
+    { "<C-b>",  function() Snacks.terminal() end, desc = "Open terminal" },
     -- Git
     { "<leader>gg", function() Snacks.lazygit() end, desc = "Lazygit" },
     { "<leader>gf", function() Snacks.lazygit.log_file() end, desc = "Git log (file)" },
