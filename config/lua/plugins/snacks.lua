@@ -26,5 +26,69 @@ return {
     { "<leader>gf", function() Snacks.lazygit.log_file() end, desc = "Git log (file)" },
     { "<leader>gl", function() Snacks.lazygit.log() end, desc = "Git log" },
     { "<leader>gc", function() Snacks.picker.git_log() end, desc = "Git commits" },
+    {
+      "<leader>gs",
+      function()
+        local root = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n$", "")
+        if root == "" then
+          Snacks.notify.warn("Not in a git repository")
+          return
+        end
+
+        local repos = { root }
+        local gitmodules = root .. "/.gitmodules"
+        if vim.fn.filereadable(gitmodules) == 1 then
+          local lines = vim.fn.systemlist(
+            "git config --file " .. gitmodules .. " --get-regexp 'submodule\\..*\\.path'"
+          )
+          for _, line in ipairs(lines) do
+            local subpath = line:match("%S+%s+(%S+)")
+            if subpath then table.insert(repos, root .. "/" .. subpath) end
+          end
+        end
+
+        local items = {}
+        for _, repo in ipairs(repos) do
+          local name = repo:match("([^/]+)$") or repo
+
+          local status_lines = vim.fn.systemlist(
+            "git -C " .. vim.fn.shellescape(repo) .. " status --porcelain 2>/dev/null"
+          )
+          local staged, dirty = false, false
+          for _, line in ipairs(status_lines) do
+            if line:sub(1, 1) ~= " " and line:sub(1, 1) ~= "?" then staged = true end
+            if line:sub(2, 2) ~= " " then dirty = true end
+          end
+
+          local sync = vim.fn.system(
+            "git -C " .. vim.fn.shellescape(repo) .. " rev-list --count --left-right @{upstream}...HEAD 2>/dev/null"
+          ):gsub("\n$", "")
+          local behind, ahead = sync:match("(%d+)%s+(%d+)")
+
+          local ind = ""
+          if staged then ind = ind .. "+" end
+          if dirty then ind = ind .. "*" end
+          if ahead and tonumber(ahead) > 0 then ind = ind .. "^" end
+          if behind and tonumber(behind) > 0 then ind = ind .. "v" end
+
+          table.insert(items, {
+            text = string.format("%-20s %-6s %s", name, ind, repo),
+            repo = repo,
+          })
+        end
+
+        Snacks.picker.pick({
+          title = "Git Submodules",
+          items = items,
+          format = "text",
+          preview = false,
+          confirm = function(picker, item)
+            picker:close()
+            Snacks.lazygit({ cwd = item.repo })
+          end,
+        })
+      end,
+      desc = "Git submodules",
+    },
   },
 }
