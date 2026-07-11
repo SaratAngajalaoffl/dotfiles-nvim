@@ -71,8 +71,13 @@ return {
           if ahead and tonumber(ahead) > 0 then ind = ind .. "^" end
           if behind and tonumber(behind) > 0 then ind = ind .. "v" end
 
+          local branch = vim.fn.system(
+            "git -C " .. vim.fn.shellescape(repo) .. " branch --show-current 2>/dev/null"
+          ):gsub("\n$", "")
+          if branch == "" then branch = "(detached)" end
+
           table.insert(items, {
-            text = string.format("%-20s %-6s %s", name, ind, repo),
+            text = string.format("%-20s %-6s %-20s %s", name, ind, branch, repo),
             repo = repo,
           })
         end
