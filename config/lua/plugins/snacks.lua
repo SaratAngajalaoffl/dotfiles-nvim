@@ -115,7 +115,7 @@ return {
           title = "Git Submodules",
           items = items,
           format = "text",
-          preview = false,
+          layout = { preview = false },
           confirm = function(picker, item)
             picker:close()
             Snacks.lazygit({ cwd = item.repo })
