@@ -1,3 +1,35 @@
+local function git_repos(root)
+  local repos = { root }
+  local gitmodules = root .. "/.gitmodules"
+  if vim.fn.filereadable(gitmodules) == 1 then
+    local lines = vim.fn.systemlist(
+      "git config --file " .. gitmodules .. " --get-regexp 'submodule\\..*\\.path'"
+    )
+    for _, line in ipairs(lines) do
+      local subpath = line:match("%S+%s+(%S+)")
+      if subpath then table.insert(repos, root .. "/" .. subpath) end
+    end
+  end
+  return repos
+end
+
+-- Neovim spawns `lazygit` via execvp (no shell, no zsh alias), so the `lg`
+-- wrapper that normally prunes recentrepos never runs. Do the same prune
+-- here before opening lazygit, since every lazygit binary reads the same
+-- state.yml regardless of how it was launched.
+local function prune_lazygit_recents()
+  local root = vim.fn.system("git rev-parse --show-toplevel 2>/dev/null"):gsub("\n$", "")
+  if root == "" then return end
+
+  local repos = git_repos(root)
+  local repos_json = vim.json.encode(repos)
+
+  local state_file = vim.fn.expand("$HOME/.local/state/lazygit/state.yml")
+  vim.fn.system({
+    "yq", "-iy", ".recentrepos = " .. repos_json, state_file,
+  })
+end
+
 return {
   "folke/snacks.nvim",
   priority = 1000,
@@ -22,7 +54,14 @@ return {
     -- Terminal
     { "<C-b>",  function() Snacks.terminal() end, desc = "Open terminal" },
     -- Git
-    { "<leader>gg", function() Snacks.lazygit() end, desc = "Lazygit" },
+    {
+      "<leader>gg",
+      function()
+        prune_lazygit_recents()
+        Snacks.lazygit()
+      end,
+      desc = "Lazygit",
+    },
     { "<leader>gf", function() Snacks.lazygit.log_file() end, desc = "Git log (file)" },
     { "<leader>gl", function() Snacks.lazygit.log() end, desc = "Git log" },
     { "<leader>gc", function() Snacks.picker.git_log() end, desc = "Git commits" },
@@ -35,17 +74,7 @@ return {
           return
         end
 
-        local repos = { root }
-        local gitmodules = root .. "/.gitmodules"
-        if vim.fn.filereadable(gitmodules) == 1 then
-          local lines = vim.fn.systemlist(
-            "git config --file " .. gitmodules .. " --get-regexp 'submodule\\..*\\.path'"
-          )
-          for _, line in ipairs(lines) do
-            local subpath = line:match("%S+%s+(%S+)")
-            if subpath then table.insert(repos, root .. "/" .. subpath) end
-          end
-        end
+        local repos = git_repos(root)
 
         local items = {}
         for _, repo in ipairs(repos) do
