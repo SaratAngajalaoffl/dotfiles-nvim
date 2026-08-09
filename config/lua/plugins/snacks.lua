@@ -52,7 +52,7 @@ return {
     { "<leader>fh", function() Snacks.picker.help() end, desc = "Help pages" },
     { "<leader>/",  function() Snacks.picker.grep_buffers() end, desc = "Search open buffers" },
     -- Terminal
-    { "<C-b>",  function() Snacks.terminal() end, desc = "Open terminal" },
+    { "<C-b>",  function() Snacks.terminal() end, desc = "Toggle terminal", mode = { "n", "t" } },
     -- Git
     {
       "<leader>gg",
