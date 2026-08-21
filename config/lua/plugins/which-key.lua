@@ -7,6 +7,7 @@ return {
       { "<leader>e", group = "explorer" },
       { "<leader>f", group = "find" },
       { "<leader>g", group = "git" },
+      { "<leader>m", group = "markdown" },
     },
   },
 }
