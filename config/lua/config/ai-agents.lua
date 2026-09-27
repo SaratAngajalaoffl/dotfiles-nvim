@@ -1,12 +1,13 @@
 local AGENTS = {
   { name = "claude-code", cmd = "claude" },
-  { name = "pi-agent",    cmd = "pi" },
+  { name = "pi-agent",    cmd = "pi", tmux = true },
 }
 
 local state = {
   win    = nil,
   active = 1,
   bufs   = {},
+  tmux   = {},
   cwd    = vim.fn.getcwd(),
 }
 
@@ -25,9 +26,17 @@ local function get_or_spawn(idx)
   if buf and vim.api.nvim_buf_is_valid(buf) then
     vim.api.nvim_buf_delete(buf, { force = true })
   end
+  local agent = AGENTS[idx]
+  local cmd = agent.cmd
+  if agent.tmux then
+    local name = "pi-nvim-" .. vim.fn.getpid()
+    state.tmux[name] = true
+    cmd = string.format("tmux new-session -A -s %s -c %s %s",
+      vim.fn.shellescape(name), vim.fn.shellescape(state.cwd), agent.cmd)
+  end
   buf = vim.api.nvim_create_buf(false, false)
   vim.api.nvim_buf_call(buf, function()
-    vim.fn.termopen(AGENTS[idx].cmd, { cwd = state.cwd })
+    vim.fn.termopen(cmd, { cwd = state.cwd })
   end)
   vim.bo[buf].buflisted = false
   state.bufs[idx] = buf
@@ -88,6 +97,17 @@ vim.api.nvim_create_autocmd("WinClosed", {
     if state.win and tonumber(ev.match) == state.win then
       state.win = nil
     end
+  end,
+})
+
+-- Tear down tmux sessions spawned for agents when nvim exits, so no session
+-- is left running behind after the popup's terminal buffer goes away.
+vim.api.nvim_create_autocmd("VimLeavePre", {
+  callback = function()
+    for name in pairs(state.tmux) do
+      vim.fn.system({ "tmux", "kill-session", "-t", name })
+    end
+    state.tmux = {}
   end,
 })
 
