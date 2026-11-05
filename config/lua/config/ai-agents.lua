@@ -11,15 +11,17 @@
 --
 -- Every session runs in a detached tmux session tagged with @agent_* options,
 -- so agents outlive nvim: reopening nvim in the same repo restores the tabs.
--- A session ends when its agent exits or when it is closed with <C-S-X>.
+-- A session ends when its agent exits or when it is closed with <C-x>.
 --
 -- Keys (inside the popup)          Keys (normal mode)
 --   <C-S-L>  hide popup              <C-S-L>     toggle popup
 --   <C-k>    next tab                <leader>aa  pick session / worktree
 --   <C-S-K>  previous tab            <leader>an  new session
---   <C-S-N>  new session
---   <C-S-X>  close session (stop / review / merge / discard)
---   <C-S-P>  pick session / worktree
+--   <C-n>    new session
+--   <C-x>    close session (stop / review / merge / discard)
+--   <C-p>    pick session / worktree
+-- (Ctrl+Shift+N/X/P are taken by kitty. These shadow the agents' own Ctrl+N/X/P
+-- inside the popup, e.g. pi's Ctrl+P model cycling: use /model there.)
 
 local AGENTS = {
   { kind = "claude", cmd = "claude" },
@@ -136,7 +138,7 @@ local function update_winbar()
     local hl = i == state.active and "%#TabLineSel#" or "%#TabLine#"
     table.insert(parts, hl .. " " .. i .. " " .. label(s) .. " ")
   end
-  table.insert(parts, "%#TabLineFill#%=%#TabLine# C-S-N new · C-S-X close · C-S-P pick ")
+  table.insert(parts, "%#TabLineFill#%=%#TabLine# C-n new · C-x close · C-p pick ")
   vim.wo[state.win].winbar = table.concat(parts, "")
 end
 
@@ -178,9 +180,9 @@ local function get_buf(s)
   map("<C-S-L>", M.toggle)
   map("<C-k>", function() M.cycle(1) end)
   map("<C-S-K>", function() M.cycle(-1) end)
-  map("<C-S-N>", M.new_session)
-  map("<C-S-X>", M.close_session)
-  map("<C-S-P>", M.pick)
+  map("<C-n>", M.new_session)
+  map("<C-x>", M.close_session)
+  map("<C-p>", M.pick)
   s.buf = buf
   return buf
 end
