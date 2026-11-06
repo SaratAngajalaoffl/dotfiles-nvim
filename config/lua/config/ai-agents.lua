@@ -5,6 +5,10 @@
 -- agent/<task>); leaving the task name empty gives a read-only session on the
 -- main checkout instead (agent-guard blocks edits there).
 --
+-- Each new session also asks whether agent-guard is on. An unguarded session
+-- runs with AGENT_ALLOW_MAIN=1, so the agent may edit / commit / merge in the
+-- main checkout; its tab is marked with "!".
+--
 -- Every session runs in a detached tmux session tagged with @agent_* options,
 -- so agents outlive nvim: reopening nvim in the same repo restores the tabs.
 -- A session ends when its agent exits or when it is closed with <C-S-X>.
@@ -29,7 +33,7 @@ local WORKTREES = vim.env.AGENT_WORKTREE_ROOT or (vim.env.HOME .. "/.worktrees")
 local state = {
   win      = nil,
   prev_win = nil,
-  sessions = {}, -- { kind, name, path, slug, tmux, buf }
+  sessions = {}, -- { kind, name, path, slug, guard, tmux, buf }
   active   = 0,
   restored = false,
 }
@@ -78,7 +82,7 @@ end
 local function is_worktree(s) return vim.startswith(s.path, WORKTREES .. "/") end
 
 local function label(s)
-  return s.kind .. ":" .. (is_worktree(s) and s.name or "main")
+  return s.kind .. ":" .. (is_worktree(s) and s.name or "main") .. (s.guard and "" or " !")
 end
 
 local function job_alive(buf)
@@ -93,10 +97,11 @@ end
 
 -- tmux sessions --------------------------------------------------------------
 
-local function tmux_name(kind, path)
+local function tmux_name(kind, path, guard)
   local rel = is_worktree({ path = path })
       and path:sub(#WORKTREES + 2):gsub("/", "--")
       or (slug(path) .. "--main")
+  if not guard then rel = rel .. "--unguarded" end
   return ("agent-" .. kind .. "-" .. rel):gsub("[^%w_-]", "-")
 end
 
@@ -106,13 +111,15 @@ local function ensure_tmux(s)
     "new-session", "-d", "-s", s.tmux, "-c", s.path,
     "-e", "AGENT_WORKTREE=" .. (is_worktree(s) and s.path or ""),
     "-e", "AGENT_KIND=" .. s.kind,
+    "-e", "AGENT_ALLOW_MAIN=" .. (s.guard and "" or "1"),
     AGENT_CMD[s.kind],
   })
   if not ok then
     notify("tmux: " .. err, vim.log.levels.ERROR)
     return false
   end
-  for k, v in pairs({ kind = s.kind, name = s.name, path = s.path, repo = s.slug }) do
+  local opts = { kind = s.kind, name = s.name, path = s.path, repo = s.slug, guard = s.guard and "on" or "off" }
+  for k, v in pairs(opts) do
     tmux({ "set-option", "-t", s.tmux, "@agent_" .. k, v })
   end
   -- the popup's winbar already shows the tabs
@@ -209,9 +216,9 @@ local function show(i)
   vim.cmd("startinsert")
 end
 
-local function add_session(kind, name, path, repo_slug)
-  local s = { kind = kind, name = name, path = path, slug = repo_slug }
-  s.tmux = tmux_name(kind, path)
+local function add_session(kind, name, path, repo_slug, guard)
+  local s = { kind = kind, name = name, path = path, slug = repo_slug, guard = guard ~= false }
+  s.tmux = tmux_name(kind, path, s.guard)
   for i, x in ipairs(state.sessions) do
     if x.tmux == s.tmux then return i end
   end
@@ -248,13 +255,13 @@ local function restore()
   state.restored = true
   local ok, out = tmux({
     "list-sessions", "-F",
-    "#{@agent_kind}\t#{@agent_name}\t#{@agent_path}\t#{@agent_repo}",
+    "#{@agent_kind}\t#{@agent_name}\t#{@agent_path}\t#{@agent_repo}\t#{@agent_guard}",
   })
   if not ok then return end
   for line in out:gmatch("[^\n]+") do
-    local kind, name, path, repo = line:match("^(.-)\t(.-)\t(.-)\t(.*)$")
+    local kind, name, path, repo, guard = line:match("^(.-)\t(.-)\t(.-)\t(.-)\t(.*)$")
     if kind and AGENT_CMD[kind] and belongs_here(repo) then
-      add_session(kind, name, path, repo)
+      add_session(kind, name, path, repo, guard ~= "off")
     end
   end
   if #state.sessions > 0 and state.active == 0 then state.active = 1 end
@@ -304,8 +311,19 @@ local function origin_dir()
   return vim.fn.getcwd()
 end
 
-local function start(kind, name, path, repo)
-  show(add_session(kind, name, path, repo))
+local function start(kind, name, path, repo, guard)
+  show(add_session(kind, name, path, repo, guard))
+end
+
+-- Ask whether agent-guard applies to the new session; cb(true|false).
+local function ask_guard(where, cb)
+  vim.ui.select({
+    { guard = true,  text = "On — edits only in worktrees" },
+    { guard = false, text = "Off — may edit, commit and merge in main checkouts (AGENT_ALLOW_MAIN=1)" },
+  }, {
+    prompt = "agent-guard for " .. where,
+    format_item = function(c) return c.text end,
+  }, function(c) if c then cb(c.guard) end end)
 end
 
 function M.new_session()
@@ -323,21 +341,23 @@ function M.new_session()
     if not agent then return end
     local function with_repo(repo_dir)
       vim.ui.input({
-        prompt = agent.kind .. " in " .. slug(repo_dir) .. " — task name (empty: read-only on main): ",
+        prompt = agent.kind .. " in " .. slug(repo_dir) .. " — task name (empty: main checkout): ",
       }, function(name)
         if name == nil then return end
         name = vim.trim(name)
-        if name == "" then
-          return start(agent.kind, "main", repo_dir, slug(repo_dir))
-        end
-        notify("creating worktree " .. name .. "…")
-        vim.system({ "agent-worktree", "new", name, "--from", repo_dir }, { text = true }, function(r)
-          vim.schedule(function()
-            if r.code ~= 0 then
-              return notify(vim.trim(r.stderr), vim.log.levels.ERROR)
-            end
-            local path = vim.trim(r.stdout):match("[^\n]*$")
-            start(agent.kind, vim.fn.fnamemodify(path, ":t"), path, slug(repo_dir))
+        ask_guard(name == "" and slug(repo_dir) .. " (main)" or name, function(guard)
+          if name == "" then
+            return start(agent.kind, "main", repo_dir, slug(repo_dir), guard)
+          end
+          notify("creating worktree " .. name .. "…")
+          vim.system({ "agent-worktree", "new", name, "--from", repo_dir }, { text = true }, function(r)
+            vim.schedule(function()
+              if r.code ~= 0 then
+                return notify(vim.trim(r.stderr), vim.log.levels.ERROR)
+              end
+              local path = vim.trim(r.stdout):match("[^\n]*$")
+              start(agent.kind, vim.fn.fnamemodify(path, ":t"), path, slug(repo_dir), guard)
+            end)
           end)
         end)
       end)
@@ -435,7 +455,9 @@ function M.pick()
         prompt = "Start which agent in " .. item.worktree.name,
         format_item = function(a) return a.kind end,
       }, function(agent)
-        if agent then start(agent.kind, item.worktree.name, item.worktree.path, item.worktree.repo) end
+        if not agent then return end
+        local wt = item.worktree
+        ask_guard(wt.name, function(guard) start(agent.kind, wt.name, wt.path, wt.repo, guard) end)
       end)
     end,
   })
